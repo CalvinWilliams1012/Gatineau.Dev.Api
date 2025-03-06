@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using UglyToad.PdfPig.DocumentLayoutAnalysis.WordExtractor;
 using System.Text.RegularExpressions;
 using Gatineau.Dev.Api.lib;
+using UglyToad.PdfPig.Core;
 
 namespace Gatineau.Dev.Api.Controllers
 {
@@ -96,9 +97,9 @@ namespace Gatineau.Dev.Api.Controllers
                 //TODO: Once we have an 'ok' raw value,use the Constants in /lib/Constants.cs to extract KVP's 
 
                 var page = document.GetPage(1);
-                //var words = page.GetWords();
-                double pageHeight = page.Height;
-                double cutoffY = pageHeight * 0.6; // Split at 60% (top 40% for blocks, bottom 60% for words)
+                var words = page.GetWords();
+                //double pageHeight = page.Height;
+                //double cutoffY = pageHeight * 0.6; // Split at 60% (top 40% for blocks, bottom 60% for words)
 
                 // Process the top 40% using RecursiveXYCut
                 /* var blocks = RecursiveXYCut.Instance.GetBlocks(words);
@@ -109,11 +110,11 @@ namespace Gatineau.Dev.Api.Controllers
                          ExtractPdfKeyValues(block.Text, extractedData);
                      }
                  }*/
-                var words = page.GetWords(NearestNeighbourWordExtractor.Instance);
-                var blocks = DefaultPageSegmenter.Instance.GetBlocks(words);
-                foreach (var block in blocks) {
-                    ExtractPdfKeyValues(block.Text, extractedData);
-                }
+                //var words = page.GetWords(NearestNeighbourWordExtractor.Instance);
+                //var blocks = DefaultPageSegmenter.Instance.GetBlocks(words);
+                //foreach (var block in blocks) {
+                //    ExtractPdfKeyValues(block.Text, extractedData);
+                //}
 
             }
             return extractedData;
@@ -121,15 +122,26 @@ namespace Gatineau.Dev.Api.Controllers
 
         public void ExtractPdfKeyValues(string text, Dictionary<string, string> data)
         {
-            ExtractAndStore(text, ":*(\\S+)\\s" + FrenchConstants.registrationNumber, FrenchConstants.registrationNumber,data);
+            foreach(var constant in Constants.labelsToRegex)
+            {
+                ExtractAndStore(text, constant.Value, constant.Key, data);
+            }
+            //ExtractAndStore(text, ":*(\\S+)\\s" + FrenchConstants.registrationNumber, FrenchConstants.registrationNumber,data);
         }
 
         public void ExtractAndStore(string text, string pattern, string key, Dictionary<string, string> data)
         {
             Match match = Regex.Match(text, pattern);
-            if(match.Success && match.Groups.Count > 1)
+            if(match.Success)
             {
-                data[key] = match.Groups[1].Value;
+                if(match.Value.Contains(key))
+                {
+                    data[key] = match.Groups[1].Value;
+                }
+                else
+                {
+                    data[key] = match.Value;
+                }
             }
         }
 
