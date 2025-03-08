@@ -34,51 +34,54 @@ namespace Gatineau.Dev.Api.Controllers
         [HttpGet]
         public string Get()
         {
-            string filePath = "./download/RapportPDF.pdf";
-            Dictionary<string, List<string>> extractedValues = new Dictionary<string, List<string>>()
+            //string filePath = "./download/RapportPDF.pdf";
+            string filePath = "C:/Users/calvi/Downloads/RapportPDF.pdf";
+            Dictionary<string, KeyExtractionSettings> keySettings = new Dictionary<string, KeyExtractionSettings>()
             {
-                { "en vigueur pour les exercices financiers:", new List<string>() },
-                { "Adresse:", new List<string>() },
-                { "Arrondissement:", new List<string>() },
-                { "Cadastre(s) et numéro(s)de lot", new List<string>() },
-                { "Numéro matricule:", new List<string>() },
-                { "Utilisation prédominante:", new List<string>() },
-                { "Numéro d'unité de voisinage:", new List<string>() },
-                { "Dossier d'évaluation No:", new List<string>() },
-                { "Nom:", new List<string>() },
-                { "Statut aux fins d'imposition scolaire:", new List<string>() },
-                { "Adresse postale:", new List<string>() },
-                { "Municipalité:", new List<string>() },
-                { "Date d'inscription au rôle:", new List<string>() },
-                { "Mesure frontale:", new List<string>() },
-                { "Superficie:", new List<string>() },
-                { "Nombre d'étages:", new List<string>() },
-                { "Année de construction:", new List<string>() },
-                { "Aire d'étages:", new List<string>() },
-                { "Genre de construction:", new List<string>() },
-                { "Lien physique:", new List<string>() },
-                { "Nombre de logements:", new List<string>() },
-                { "Nombre de locaux non residentiels:", new List<string>() },
-                { "Date de référence au marché:", new List<string>() },
-                { "Nombre de chambres locatives:", new List<string>() },
-                { "Valeur du terrain:", new List<string>() },
-                { "Valeur du bâtiment:", new List<string>() },
-                { "Valeur de l'immeuble:", new List<string>() },
-                { "Valeur de l'immeuble au rôle antérieur:", new List<string>() },
-                { "d'application des taux variés de taxation :", new List<string>() },
-                { "Valeur imposable:", new List<string>() },
-                { "Valeur non imposable:", new List<string>() }
+                { "en vigueur pour les exercices financiers:", new KeyExtractionSettings(false) },
+                { "Adresse:", new KeyExtractionSettings(false) },
+                { "Arrondissement:", new KeyExtractionSettings(false) },
+                { "Cadastre(s) et numéro(s)de lot", new KeyExtractionSettings(false) },
+                { "Numéro matricule:", new KeyExtractionSettings(false) },
+                { "Utilisation prédominante:", new KeyExtractionSettings(false) },
+                { "Numéro d'unité de voisinage:", new KeyExtractionSettings(false) },
+                { "Dossier d'évaluation No:", new KeyExtractionSettings(false) },
+                { "Nom:", new KeyExtractionSettings(false) },
+                { "Statut aux fins d'imposition scolaire:", new KeyExtractionSettings(false) },
+                { "Adresse postale:", new KeyExtractionSettings(false) },
+                { "Municipalité:", new KeyExtractionSettings(false) },
+                { "Date d'inscription au rôle:", new KeyExtractionSettings(true) },
+                { "Mesure frontale:", new KeyExtractionSettings(true,200,2) },
+                { "Superficie:", new KeyExtractionSettings(true,250,2) },
+                { "Nombre d'étages:", new KeyExtractionSettings(false) },
+                { "Année de construction:", new KeyExtractionSettings(false) },
+                { "Aire d'étages:", new KeyExtractionSettings(false) },
+                { "Genre de construction:", new KeyExtractionSettings(false) },
+                { "Lien physique:", new KeyExtractionSettings(false) },
+                { "Nombre de logements:", new KeyExtractionSettings(false) },
+                { "Nombre de locaux non residentiels:", new KeyExtractionSettings(false) },
+                { "Nombre de chambres locatives:", new KeyExtractionSettings(false) },
+                { "Date de référence au marché:", new KeyExtractionSettings(false) },
+                { "Valeur du terrain:", new KeyExtractionSettings(false) },
+                { "Valeur du bâtiment:", new KeyExtractionSettings(false) },
+                { "Valeur de l'immeuble:", new KeyExtractionSettings(false) },
+                { "Valeur de l'immeuble au rôle antérieur:", new KeyExtractionSettings(false) },
+                { "d'application des taux variés de taxation :", new KeyExtractionSettings(false) },
+                { "Valeur imposable:", new KeyExtractionSettings(true) },
+                { "Valeur non imposable:", new KeyExtractionSettings(false) }
             };
 
+            // Store extracted values separately
+            var extractedValues = keySettings.Keys.ToDictionary(key => key, key => new List<string>());
 
             using (PdfDocument document = PdfDocument.Open(filePath))
             {
                 var page = document.GetPage(1);
                 var words = page.GetWords().ToList();
 
-                foreach (var key in extractedValues.Keys.ToList())
+                foreach (var key in keySettings.Keys)
                 {
-                    ExtractValuesByCoordinates(page, words, key, extractedValues);
+                    ExtractValuesByCoordinates(page, words, key, keySettings[key], extractedValues);
                 }
             }
 
@@ -89,10 +92,11 @@ namespace Gatineau.Dev.Api.Controllers
             }
             return stringBuilder.ToString();
         }
-        static void ExtractValuesByCoordinates(UglyToad.PdfPig.Content.Page page, List<Word> words, string key, Dictionary<string, List<string>> values)
+        static void ExtractValuesByCoordinates(UglyToad.PdfPig.Content.Page page, List<Word> words, string key, KeyExtractionSettings settings, Dictionary<string, List<string>> values)
         {
             string[] keyParts = key.Split(' '); // Split key into words
             int keyLength = keyParts.Length;
+            double yTolerance = 5; // Increased tolerance for slight misalignment
 
             // Find a sequence of words that match the key
             for (int i = 0; i <= words.Count - keyLength; i++)
@@ -107,15 +111,20 @@ namespace Gatineau.Dev.Api.Controllers
                     double keyBottom = segment.Last().BoundingBox.Bottom;
                     double keyMidY = (keyTop + keyBottom) / 2; // Middle Y-coordinate of the key
 
-                    double yTolerance = 5; // Increased tolerance for slight misalignment
-
-                    // Find the closest word(s) to the right **on nearly the same horizontal level**
-                    var valueWords = words
+                    // Find words that are on the same Y level
+                    var potentialValues = words
                         .Where(w =>
-                            w.BoundingBox.Left > keyRight && // Must be to the right
-                            Math.Abs(((w.BoundingBox.Top + w.BoundingBox.Bottom) / 2) - keyMidY) < yTolerance) // Increased tolerance
-                        .OrderBy(w => w.BoundingBox.Left) // Maintain reading order
-                        .Take(5) // Limit to 5 words (adjustable)
+                            w.BoundingBox.Left > keyRight && // Must be to the right of the key
+                            Math.Abs(((w.BoundingBox.Top + w.BoundingBox.Bottom) / 2) - keyMidY) < yTolerance) // similar Y value of the key
+                        .OrderBy(w => w.BoundingBox.Left).ToList();//order to keep correct reading order
+
+                    if (settings.UseMaxDistance)
+                    {
+                        potentialValues = potentialValues.Where(w => (w.BoundingBox.Left - keyRight) < settings.MaxKeyValueDistance).ToList();
+                    }
+                    // Find the closest word(s) to the right **on nearly the same horizontal level**
+                    var valueWords = potentialValues
+                        .Take(settings.WordsToTake) // Limit to 5 words (adjustable)
                         .Select(w => w.Text)
                         .ToList();
 
@@ -128,6 +137,21 @@ namespace Gatineau.Dev.Api.Controllers
             }
         }
 
+        // Class to store extraction settings
+        class KeyExtractionSettings
+        {
+            public bool UseMaxDistance { get; }
+            public double MaxKeyValueDistance { get; }
+
+            public int WordsToTake { get; }
+
+            public KeyExtractionSettings(bool useMaxDistance, double maxKeyValueDistance = 100, int wordsToTake = 5)
+            {
+                UseMaxDistance = useMaxDistance;
+                MaxKeyValueDistance = maxKeyValueDistance;
+                WordsToTake = wordsToTake;
+            }
+        }
 
         private void buildPageExample()
         {
