@@ -18,6 +18,7 @@ using UglyToad.PdfPig.DocumentLayoutAnalysis.WordExtractor;
 using System.Text.RegularExpressions;
 using Gatineau.Dev.Api.lib;
 using UglyToad.PdfPig.Core;
+using System.Text;
 
 namespace Gatineau.Dev.Api.Controllers
 {
@@ -81,66 +82,77 @@ namespace Gatineau.Dev.Api.Controllers
 
                 await download.SaveAsAsync("./download/" + download.SuggestedFilename);
 
-                var text = ProcessPDF("./download/" + download.SuggestedFilename);
 
-                return solvedCaptcha + Environment.NewLine + onclickString + Environment.NewLine + text[FrenchConstants.registrationNumber];
+                var extractedValues = ProcessPDF("./download/" + download.SuggestedFilename);
+
+                StringBuilder stringBuilder = new StringBuilder();
+                foreach (var item in extractedValues)
+                {
+                    stringBuilder.Append($"{item.Key} = {System.String.Join(", ", item.Value.ToArray())} {Environment.NewLine}");
+                }
+
+                return solvedCaptcha + Environment.NewLine + onclickString + Environment.NewLine + stringBuilder.ToString();
             }
             return "done.";
         }
-        public Dictionary<string, string> ProcessPDF(String pdf)
+
+        private static Dictionary<string, List<string>> ProcessPDF(string pdfFilePath)
         {
-            Dictionary<string, string> extractedData = new Dictionary<string, string>();
+            var extractedValues = Constants.KeySettings.Keys.ToDictionary(key => key, key => new List<string>());
 
-            using (PdfDocument document = PdfDocument.Open(pdf))
+            using (PdfDocument document = PdfDocument.Open(pdfFilePath))
             {
-                //TODO: instead of just getting raw text unformatted, utilize some form of blocking to get us better raw text data: https://github.com/UglyToad/PdfPig/wiki/Document-Layout-Analysis
-                //TODO: Once we have an 'ok' raw value,use the Constants in /lib/Constants.cs to extract KVP's 
-
                 var page = document.GetPage(1);
-                var words = page.GetWords();
-                //double pageHeight = page.Height;
-                //double cutoffY = pageHeight * 0.6; // Split at 60% (top 40% for blocks, bottom 60% for words)
+                var words = page.GetWords().ToList();
 
-                // Process the top 40% using RecursiveXYCut
-                /* var blocks = RecursiveXYCut.Instance.GetBlocks(words);
-                 foreach (var block in blocks)
-                 {
-                     if (block.BoundingBox.Bottom >= cutoffY) // Only process top 40%
-                     {
-                         ExtractPdfKeyValues(block.Text, extractedData);
-                     }
-                 }*/
-                //var words = page.GetWords(NearestNeighbourWordExtractor.Instance);
-                //var blocks = DefaultPageSegmenter.Instance.GetBlocks(words);
-                //foreach (var block in blocks) {
-                //    ExtractPdfKeyValues(block.Text, extractedData);
-                //}
-
-            }
-            return extractedData;
-        }
-
-        public void ExtractPdfKeyValues(string text, Dictionary<string, string> data)
-        {
-            foreach(var constant in Constants.labelsToRegex)
-            {
-                ExtractAndStore(text, constant.Value, constant.Key, data);
-            }
-            //ExtractAndStore(text, ":*(\\S+)\\s" + FrenchConstants.registrationNumber, FrenchConstants.registrationNumber,data);
-        }
-
-        public void ExtractAndStore(string text, string pattern, string key, Dictionary<string, string> data)
-        {
-            Match match = Regex.Match(text, pattern);
-            if(match.Success)
-            {
-                if(match.Value.Contains(key))
+                foreach (var key in Constants.KeySettings.Keys)
                 {
-                    data[key] = match.Groups[1].Value;
+                    ExtractPdfValuesByCoordinates(page, words, key, Constants.KeySettings[key], extractedValues);
                 }
-                else
+            }
+            return extractedValues;
+        }
+        private static void ExtractPdfValuesByCoordinates(UglyToad.PdfPig.Content.Page page, List<Word> words, string key, KeyExtractionSettings settings, Dictionary<string, List<string>> values)
+        {
+            string[] keyParts = key.Split(' '); // Split key into words
+            int keyLength = keyParts.Length;
+            double yTolerance = 5; // Increased tolerance for slight misalignment
+
+            // Find a sequence of words that match the key
+            for (int i = 0; i <= words.Count - keyLength; i++)
+            {
+                var segment = words.Skip(i).Take(keyLength).ToList();
+                if (segment.Count == keyLength && segment.Select(w => w.Text).SequenceEqual(keyParts))
                 {
-                    data[key] = match.Value;
+                    // Get bounding box covering the full key phrase
+                    double keyLeft = segment.First().BoundingBox.Left;
+                    double keyRight = segment.Last().BoundingBox.Right;
+                    double keyTop = segment.First().BoundingBox.Top;
+                    double keyBottom = segment.Last().BoundingBox.Bottom;
+                    double keyMidY = (keyTop + keyBottom) / 2; // Middle Y-coordinate of the key
+
+                    // Find words that are on the same Y level
+                    var potentialValues = words
+                        .Where(w =>
+                            w.BoundingBox.Left > keyRight && // Must be to the right of the key
+                            Math.Abs(((w.BoundingBox.Top + w.BoundingBox.Bottom) / 2) - keyMidY) < yTolerance) // similar Y value of the key
+                        .OrderBy(w => w.BoundingBox.Left).ToList();//order to keep correct reading order
+
+                    if (settings.UseMaxDistance)
+                    {
+                        potentialValues = potentialValues.Where(w => (w.BoundingBox.Left - keyRight) < settings.MaxKeyValueDistance).ToList();
+                    }
+                    // Find the closest word(s) to the right **on nearly the same horizontal level**
+                    var valueWords = potentialValues
+                        .Take(settings.WordsToTake) // Limit to 5 words (adjustable)
+                        .Select(w => w.Text)
+                        .ToList();
+
+                    if (valueWords.Any())
+                    {
+                        values[key].Add(string.Join(" ", valueWords));
+                    }
+                    //Even if we find a match, we keep going, some elements have duplicates
                 }
             }
         }
