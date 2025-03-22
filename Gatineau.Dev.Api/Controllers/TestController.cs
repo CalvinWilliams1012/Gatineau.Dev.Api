@@ -26,6 +26,14 @@ namespace Gatineau.Dev.Api.Controllers
     [ApiController]
     public class TestController : ControllerBase
     {
+        public async Task Screenshot(IPage page, string filename)
+        {
+            using MemoryStream ms = new MemoryStream(await page.ScreenshotAsync());
+            #pragma warning disable CA1416 // Validate platform compatibility
+            Image.FromStream(ms).Save($"C:/Users/calvi/source/repos/Gatineau.Dev.Api/Gatineau.Dev.Api/download/{filename}.jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
+            #pragma warning restore CA1416 // Validate platform compatibility
+        }
+
         [HttpGet]
         public async Task<string> Get()
         {
