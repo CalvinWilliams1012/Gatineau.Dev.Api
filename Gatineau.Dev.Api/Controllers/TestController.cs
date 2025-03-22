@@ -19,6 +19,7 @@ using System.Text.RegularExpressions;
 using Gatineau.Dev.Api.lib;
 using UglyToad.PdfPig.Core;
 using System.Text;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Gatineau.Dev.Api.Controllers
 {
@@ -40,56 +41,34 @@ namespace Gatineau.Dev.Api.Controllers
             using (HttpClient client = new HttpClient())
             {
                 using var playwright = await Playwright.CreateAsync();
-                await using var browser = await playwright.Chromium.LaunchAsync();
+                await using var browser = await playwright.Chromium.LaunchAsync(new() { SlowMo = 2000});
                 var page = await browser.NewPageAsync();
                 await page.GotoAsync("https://www3.gatineau.ca/servicesenligne/evaluation/Adresse.aspx");
                 await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
                 string imageSrc = await page.GetByAltText("Captcha").GetAttributeAsync("src");
 
                 var response = await client.GetAsync($"https://www3.gatineau.ca/servicesenligne/evaluation/{imageSrc}");
-                string solvedCaptcha = Process(await response.Content.ReadAsStreamAsync());
 
+                string solvedCaptcha = Process(await response.Content.ReadAsStreamAsync());
+                /*
                 using (var fs = new FileStream($"./download/{imageSrc.Substring(22)}.jpg", FileMode.CreateNew))
                 {
                     await response.Content.CopyToAsync(fs);
-                }
-                using (var ms = new MemoryStream(await page.ScreenshotAsync()))
-                {
-#pragma warning disable CA1416 // Validate platform compatibility
-                    Image.FromStream(ms).Save("C:/Users/calvi/source/repos/Gatineau.Dev.Api/Gatineau.Dev.Api/download/screenshotBefore.jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
-#pragma warning restore CA1416 // Validate platform compatibility
-                }
+                }*/
+
                 await page.Locator("#ctl00_cphTexte_tbxListeRue").PressSequentiallyAsync("Bagot, rue");
-                await page.Locator("#ctl00_cphTexte_NoImmTextBox").PressSequentiallyAsync("88");
+                await page.Locator("#ctl00_cphTexte_NoImmTextBox").PressSequentiallyAsync("91");
                 await page.Locator("#ctl00_cphTexte_CodeTextBox").PressSequentiallyAsync(solvedCaptcha);
-                using (var ms = new MemoryStream(await page.ScreenshotAsync()))
-                {
-#pragma warning disable CA1416 // Validate platform compatibility
-                    Image.FromStream(ms).Save("C:/Users/calvi/source/repos/Gatineau.Dev.Api/Gatineau.Dev.Api/download/screenshotBeforeClick.jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
-#pragma warning restore CA1416 // Validate platform compatibility
-                }
 
-                var hiddenField = await page.Locator("#ctl00_cphTexte_ScriptManager1_HiddenField").GetAttributeAsync("value");
-                await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-                await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-                await page.ClickAsync("#ctl00_cphTexte_ListButton");
-                await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-                await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                await page.Locator("#ctl00_cphTexte_ListButton").ClickAsync();
 
-                using (var ms = new MemoryStream(await page.ScreenshotAsync()))
-                {
-#pragma warning disable CA1416 // Validate platform compatibility
-                    Image.FromStream(ms).Save("C:/Users/calvi/source/repos/Gatineau.Dev.Api/Gatineau.Dev.Api/download/screenshotAfter.jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
-#pragma warning restore CA1416 // Validate platform compatibility
-                }
+               //ClickAsync("#ctl00_cphTexte_ListButton", new() { Force = true });//bp
 
-                var onclickString = await page.Locator("#ctl00_cphTexte_lkbRapport").GetAttributeAsync("onclick");
+                await Assertions.Expect(page.Locator("#ctl00_cphTexte_lkbRapport")).ToBeAttachedAsync(new() { Timeout = 10_000 });
 
                 var download = await page.RunAndWaitForDownloadAsync(async () => { await page.Locator("#ctl00_cphTexte_lkbRapport").ClickAsync(); });
 
                 await download.SaveAsAsync("./download/" + download.SuggestedFilename);
-
 
                 var extractedValues = ProcessPDF("./download/" + download.SuggestedFilename);
 
@@ -99,7 +78,7 @@ namespace Gatineau.Dev.Api.Controllers
                     stringBuilder.Append($"{item.Key} = {System.String.Join(", ", item.Value.ToArray())} {Environment.NewLine}");
                 }
 
-                return solvedCaptcha + Environment.NewLine + onclickString + Environment.NewLine + stringBuilder.ToString();
+                return solvedCaptcha + Environment.NewLine + stringBuilder.ToString();
             }
             return "done.";
         }
