@@ -10,7 +10,7 @@
         public string PredominantUse { get; set; }
         public string UnitNumber { get; set; }
         public string AssessmentFileNumber { get; set; }
-        public Owner[] Owners { get; set; }
+        public List<Owner> Owners { get; set; }
         public string Frontage { get; set; }
         public string Area { get; set; }
         public int Floors { get; set; }

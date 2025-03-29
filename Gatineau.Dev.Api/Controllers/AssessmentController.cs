@@ -5,6 +5,8 @@ using OpenAI.Chat;
 using System.Text;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig;
+using Gatineau.Dev.Api.Models;
+using System.Text.Json;
 
 namespace Gatineau.Dev.Api.Controllers
 {
@@ -23,7 +25,7 @@ namespace Gatineau.Dev.Api.Controllers
             using (HttpClient client = new HttpClient())
             {
                 using var playwright = await Playwright.CreateAsync();
-                await using var browser = await playwright.Chromium.LaunchAsync(new() { SlowMo = 2000 });
+                await using var browser = await playwright.Chromium.LaunchAsync(new() { SlowMo = 1000 });
                 var page = await browser.NewPageAsync();
                 await page.GotoAsync("https://www3.gatineau.ca/servicesenligne/evaluation/Adresse.aspx");
                 await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
@@ -32,19 +34,12 @@ namespace Gatineau.Dev.Api.Controllers
                 var response = await client.GetAsync($"https://www3.gatineau.ca/servicesenligne/evaluation/{imageSrc}");
 
                 string solvedCaptcha = Process(await response.Content.ReadAsStreamAsync());
-                /*
-                using (var fs = new FileStream($"./download/{imageSrc.Substring(22)}.jpg", FileMode.CreateNew))
-                {
-                    await response.Content.CopyToAsync(fs);
-                }*/
 
                 await page.Locator("#ctl00_cphTexte_tbxListeRue").PressSequentiallyAsync(address?.StreetName);
                 await page.Locator("#ctl00_cphTexte_NoImmTextBox").PressSequentiallyAsync(address?.StreetNumber);
                 await page.Locator("#ctl00_cphTexte_CodeTextBox").PressSequentiallyAsync(solvedCaptcha);
 
                 await page.Locator("#ctl00_cphTexte_ListButton").ClickAsync();
-
-                //ClickAsync("#ctl00_cphTexte_ListButton", new() { Force = true });//bp
 
                 await Assertions.Expect(page.Locator("#ctl00_cphTexte_lkbRapport")).ToBeAttachedAsync(new() { Timeout = 10_000 });
 
@@ -54,15 +49,55 @@ namespace Gatineau.Dev.Api.Controllers
 
                 var extractedValues = ProcessPDF("./download/" + download.SuggestedFilename);
 
-                StringBuilder stringBuilder = new StringBuilder();
-                foreach (var item in extractedValues)
+                //manually assigning object based on pdf key.
+                //I could use an Attribute on each property and reflection to retreive the pdf key
+                //or something more complicated like delegates/Actions.. but this is simple and will work
+                List<Owner> owners = new List<Owner>();
+                for(int i = 0; i < extractedValues["Nom:"].Count; i++)
                 {
-                    stringBuilder.Append($"{item.Key} = {System.String.Join(", ", item.Value.ToArray())} {Environment.NewLine}");
+                    owners.Add(new Owner()
+                    {
+                        Name = extractedValues["Nom:"][i],
+                        SchoolTaxStatus = extractedValues["Statut aux fins d'imposition scolaire:"][i],
+                        //This limits multiple owners to an individual address and registration date
+                        //I haven't seen any pdf's that have multiple addresses/different dates as of yet.
+                        MailingAddress = $"{extractedValues["Adresse postale:"].First()} {extractedValues["Municipalité:"].First()}",
+                        RegistrationDate = extractedValues["Date d'inscription au rôle:"].First()
+                    }
+                    );
                 }
-
-                return solvedCaptcha + Environment.NewLine + stringBuilder.ToString();
+                Assessment assessment = new Assessment()
+                {
+                    FinancialYears = extractedValues["en vigueur pour les exercices financiers:"].First(),
+                    Address = extractedValues["Adresse:"].First(),
+                    District = extractedValues["Arrondissement:"].First(),
+                    LotNumbers = extractedValues["Cadastre(s) et numéro(s)de lot"].First(),
+                    RegistrationNumber = extractedValues["Numéro matricule:"].First(),
+                    PredominantUse = extractedValues["Utilisation prédominante:"].First(),
+                    UnitNumber = extractedValues["Numéro d'unité de voisinage:"].First(),
+                    AssessmentFileNumber = extractedValues["Dossier d'évaluation No:"].First(),
+                    Owners = owners,
+                    Frontage = extractedValues["Mesure frontale:"].First(),
+                    Area = extractedValues["Superficie:"].First(),
+                    Floors = Int32.Parse(extractedValues["Nombre d'étages:"].First()),
+                    YearOfConstruction = Int32.Parse(extractedValues["Année de construction:"].First()),
+                    FloorArea = extractedValues["Aire d'étages:"].First(),
+                    ConstructionType = extractedValues["Genre de construction:"].First(),
+                    PhysicalLink = extractedValues["Lien physique:"].First(),
+                    NumberOfDwellings = Int32.Parse(extractedValues["Nombre de logements:"].First()),
+                    NumberOfNonResidential = Int32.Parse(extractedValues["Nombre de locaux non residentiels:"].First()),
+                    NumberOfRentalRooms = Int32.Parse(extractedValues["Nombre de chambres locatives:"].First()),
+                    MarketReferenceDate = extractedValues["Date de référence au marché:"].First(),
+                    LandValue = ExtractDecimal(extractedValues["Valeur du terrain:"].First()),
+                    BuildingValue = ExtractDecimal(extractedValues["Valeur du bâtiment:"].First()),
+                    TotalValue = ExtractDecimal(extractedValues["Valeur de l'immeuble:"].First()),
+                    PreviousValue = ExtractDecimal(extractedValues["Valeur de l'immeuble au rôle antérieur:"].First()),
+                    TaxRate = extractedValues["d'application des taux variés de taxation :"].First(),
+                    TaxableValue = ExtractDecimal(extractedValues["Valeur imposable:"].First()),
+                    NonTaxableValue = ExtractDecimal(extractedValues["Valeur non imposable:"].First())
+                };
+                return JsonSerializer.Serialize(assessment);
             }
-            return "done.";
         }
 
         private static Dictionary<string, List<string>> ProcessPDF(string pdfFilePath)
@@ -141,6 +176,11 @@ namespace Gatineau.Dev.Api.Controllers
 
             ChatCompletion completion = client.CompleteChat(messages);
             return completion.Content[0].Text;
+        }
+
+        private Decimal ExtractDecimal(string s)
+        {
+            return Convert.ToDecimal(s.Replace(" ", String.Empty).Replace("$", String.Empty));
         }
     }
 }
